@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0', // 允许任意地址访问
       proxy: {
         '/api': {
-          target: env.VITE_API_URL || 'http://localhost',
+          target: env.VITE_API_URL || 'http://localhost:8080',
           changeOrigin: true,
           rewrite: (path) => {
             console.log('Rewriting path:', path);
@@ -25,7 +25,7 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       // 将环境变量暴露给前端代码
-      'import.meta.env.VITE_WS_URL': JSON.stringify(env.VITE_WS_URL || 'ws://localhost/ws')
+      'import.meta.env.VITE_WS_URL': JSON.stringify(env.VITE_WS_URL || 'ws://localhost:8080/ws')
     }
   }
 })
