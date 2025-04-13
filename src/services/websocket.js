@@ -24,7 +24,7 @@ class WebSocketService {
 
     try {
       // 从环境变量中获取WebSocket地址
-      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:18000/ws';
+      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
       console.log('Connecting to WebSocket:', wsUrl);
       
       this.ws = new WebSocket(wsUrl);
