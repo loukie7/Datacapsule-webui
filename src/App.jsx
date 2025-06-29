@@ -8,6 +8,8 @@ import { chatApi } from './api';
 import './App.css';
 import ChatPanel from './components/ChatPanel';
 import DebugPanel from './components/DebugPanel';
+import DocumentParsingPage from './components/DocumentParsingPage';
+import DocumentViewPage from './components/DocumentViewPage';
 import SamplesPage from './components/SamplesPage';
 import { websocketService } from './services/websocket';
 
@@ -461,6 +463,15 @@ function App() {
                           <button
                             onClick={() => {
                               setMenuOpen(false);
+                              navigate('/document-parsing');
+                            }}
+                            className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          >
+                            文档解析
+                          </button>
+                          <button
+                            onClick={() => {
+                              setMenuOpen(false);
                               setIsBatchValidationOpen(true);
                             }}
                             className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -527,6 +538,8 @@ function App() {
             </>
           } />
           <Route path="/samples" element={<SamplesPage />} />
+          <Route path="/document-parsing" element={<DocumentParsingPage />} />
+          <Route path="/document-view/:id" element={<DocumentViewPage />} />
         </Routes>
       </div>
     </>
