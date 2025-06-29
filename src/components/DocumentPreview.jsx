@@ -34,6 +34,7 @@ function DocumentPreview({ document, currentPage }) {
           </div>
         ) : (
           <iframe
+            key={currentPage}
             src={pdfUrl}
             className="w-full h-full border-0 rounded-lg shadow"
             title={`${document.filename} - 第 ${currentPage} 页`}

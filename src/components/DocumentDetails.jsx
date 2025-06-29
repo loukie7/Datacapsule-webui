@@ -13,7 +13,7 @@ const filterButtons = [
     { id: 'header_footer', label: '页眉页脚', color: 'bg-indigo-500', types: ['header_footer'] }
 ];
 
-export default function DocumentDetails() {
+export default function DocumentDetails({ onCardClick }) {
     const [rawData, setRawData] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -90,6 +90,7 @@ export default function DocumentDetails() {
                             item={item}
                             onCopy={() => navigator.clipboard.writeText(JSON.stringify(item, null, 2))}
                             onDelete={() => console.log('Delete item:', item.id)}
+                            onClick={() => onCardClick(item.page_idx + 1)}
                         />
                     ))
                 ) : (

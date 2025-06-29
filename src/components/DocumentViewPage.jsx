@@ -187,7 +187,10 @@ function DocumentViewPage() {
           </div>
 
           <div className="bg-gray-50 border-l border-gray-200 h-full overflow-y-auto">
-            <DocumentDetails documentId={document.id} />
+            <DocumentDetails
+              documentId={document.id}
+              onCardClick={setCurrentPage}
+            />
           </div>
         </SplitPane>
       </div>

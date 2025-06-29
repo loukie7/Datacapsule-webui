@@ -4,7 +4,7 @@ import rehypeKatex from 'rehype-katex';
 import remarkMath from 'remark-math';
 import TypeTag from './TypeTag';
 
-export default function DetailCard({ item, onCopy, onDelete }) {
+export default function DetailCard({ item, onCopy, onDelete, onClick }) {
   const renderContent = () => {
     switch (item.type) {
       case 'title':
@@ -44,7 +44,10 @@ export default function DetailCard({ item, onCopy, onDelete }) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 flex flex-col gap-3">
+    <div 
+      className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 flex flex-col gap-3 cursor-pointer hover:shadow-md hover:border-blue-400 transition-all"
+      onClick={onClick}
+    >
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-2">
             <TypeTag type={item.type} />
