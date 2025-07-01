@@ -1,5 +1,6 @@
 import { ChatBubbleLeftRightIcon, CodeBracketIcon, EllipsisVerticalIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Toaster, toast } from 'react-hot-toast';
 import { Route, Routes, useNavigate } from 'react-router-dom';
 import SplitPane from 'split-pane-react';
@@ -285,9 +286,18 @@ function App() {
 
     try {
       for await (const response of chatApi.sendMessage(message, currentVersion)) {
+        console.log('收到响应:', response); // 添加调试日志
         if (response.type === 'stream') {
-          setStreamingMessage(response.content);
-          setStreamingReasoning(response.reasoning || '');
+          const timestamp = Date.now();
+          console.log('流式消息接收时间:', timestamp, '内容:', response.content, '推理:', response.reasoning);
+          
+          // 使用 flushSync 强制立即更新状态，确保实时显示
+          flushSync(() => {
+            setStreamingMessage(response.content);
+            setStreamingReasoning(response.reasoning || '');
+          });
+          
+          console.log('状态更新完成时间:', Date.now() - timestamp, 'ms');
         } else if (response.type === 'complete') {
           setStreamingMessage('');
           setStreamingReasoning('');

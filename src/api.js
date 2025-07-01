@@ -1,8 +1,5 @@
 // WebSocket连接状态常量
-const WS_CONNECTING = 0;
 const WS_OPEN = 1;
-const WS_CLOSING = 2;
-const WS_CLOSED = 3;
 
 // 导入WebSocket服务
 import { websocketService } from './services/websocket';
@@ -10,79 +7,15 @@ import { websocketService } from './services/websocket';
 // Store samples in memory
 let savedSamples = [];
 
-// Parse SSE data
-const parseSSEData = (chunk) => {
-  try {
-    // 特殊处理[DONE]消息
-    if (chunk === 'data: [DONE]') {
-      return { done: true };
-    }
-    
-    const lines = chunk.split('\n');
-    const parsedMessages = [];
-    let currentData = '';
-    
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        if (currentData) {
-          try {
-            // 尝试解析为JSON
-            const parsed = JSON.parse(currentData);
-            
-            // 如果包含prompt_history字段，尝试直接解析它
-            if (parsed.prompt_history) {
-              try {
-                parsed.prompt_history = JSON.parse(parsed.prompt_history);
-              } catch (e) {
-                console.warn('Failed to parse prompt_history:', e);
-                // 保持原样如果解析失败
-              }
-            }
-            
-            parsedMessages.push(parsed);
-          } catch (e) {
-            console.warn('Failed to parse message:', currentData, e);
-          }
-          currentData = '';
-        }
-        currentData = line.slice(6);
-      } else if (line.trim() && currentData) {
-        currentData += line;
-      }
-    }
 
-    if (currentData) {
-      try {
-        // 尝试解析最后的buffer
-        const parsed = JSON.parse(currentData);
-        
-        // 如果包含prompt_history字段，尝试直接解析它
-        if (parsed.prompt_history) {
-          try {
-            parsed.prompt_history = JSON.parse(parsed.prompt_history);
-          } catch (e) {
-            console.warn('Failed to parse prompt_history from last buffer:', e);
-            // 保持原样如果解析失败
-          }
-        }
-        
-        parsedMessages.push(parsed);
-      } catch (e) {
-        console.warn('Failed to parse final message:', currentData, e);
-      }
-    }
-
-    return parsedMessages[0] || null;
-  } catch (e) {
-    console.error('Error parsing SSE data:', e, chunk);
-    return null;
-  }
-};
 
 // Calculate token count
 const calculateTokens = (text) => {
   return Math.ceil((text?.length || 0) / 4);
 };
+
+// API 基础 URL
+const API_BASE_URL = 'http://localhost:8080';
 
 // 默认请求配置
 const defaultFetchOptions = {
@@ -256,7 +189,7 @@ export const chatApi = {
       params.append('page_size', pageSize.toString());
       params.append('fields', 'id,timestamp,question,model,version,processingTime');
 
-      const response = await fetchWithTimeout(`/api/interactions?${params.toString()}`);
+      const response = await fetchWithTimeout(`${API_BASE_URL}/interactions?${params.toString()}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -291,7 +224,7 @@ export const chatApi = {
   // Get sample details by ID
   async getSampleDetails(id) {
     try {
-      const response = await fetchWithTimeout(`/api/interactions/${id}`);
+      const response = await fetchWithTimeout(`${API_BASE_URL}/interactions/${id}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -533,392 +466,171 @@ export const chatApi = {
 
   // Send message and get streaming response
   async *sendMessage(message, version = '1.0.0') {
-    const maxRetries = 2; // 最大重试次数
+    const maxRetries = 2; // Maximum retries
     let retryCount = 0;
     
     while (retryCount <= maxRetries) {
       try {
-        // 增加超时时间到5分钟，适应长时间推理需求
-        const response = await fetchWithTimeout('/api/chat', {
+        const response = await fetchWithTimeout(`${API_BASE_URL}/chat`, {
           method: 'POST',
-          headers: {
+          headers: { 
             'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
           },
-          body: JSON.stringify({
-            prompt: message,
-            stream: 1,
-            version: version
-          }),
-          timeout: 5 * 60 * 1000 // 5分钟超时
+          body: JSON.stringify({ prompt: message, stream: 1, version: version }),
+          timeout: 5 * 60 * 1000, // 5 minute timeout
+          cache: 'no-cache' // 禁用缓存
         });
-
-        // 如果服务器返回500错误，尝试重试
-        if (response.status === 500) {
-          retryCount++;
-          if (retryCount <= maxRetries) {
-            const waitTime = 2000 * retryCount; // 递增等待时间
-            console.warn(`服务器返回500错误，${waitTime/1000}秒后进行第${retryCount}次重试...`);
-            yield {
-              type: 'progress',
-              content: `服务器处理请求时遇到问题，正在重试(${retryCount}/${maxRetries})...`,
-              retrying: true
-            };
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            continue;
-          }
-        }
-
+        
         if (!response.ok) {
-          // 尝试获取详细错误信息
-          let errorDetail = '';
-          try {
-            const errorData = await response.json();
-            errorDetail = errorData.detail || errorData.message || '';
-          } catch (e) {
-            // 无法解析JSON，使用状态文本
-            errorDetail = response.statusText;
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.warn(`HTTP ${response.status} error, retrying (${retryCount}/${maxRetries})...`);
+            await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // 指数退避
+            continue; // 重试
+          } else {
+            throw new Error(`HTTP error! status: ${response.status}`);
           }
-          
-          throw new Error(`HTTP error! status: ${response.status}, detail: ${errorDetail}`);
         }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-        let buffer = '';
         let streamedResponse = '';
         let lastReasoning = '';
-        let lastActivityTime = Date.now();
-        let promptHistory = null; // 存储最后接收到的完整prompt_history
         
-        // 设置心跳检测，每30秒检查一次是否有新数据
-        const heartbeatInterval = 30 * 1000; // 30秒
-        const maxInactiveTime = 10 * 60 * 1000; // 10分钟无活动则超时，增加容忍度
-        
-        // 创建一个变量来跟踪是否需要发送进度更新
-        let needsProgressUpdate = false;
-        let progressUpdateData = null;
-        let lastProgressTime = 0;
-        
-        // 创建心跳检测定时器
-        const heartbeatTimer = setInterval(() => {
-          const inactiveTime = Date.now() - lastActivityTime;
-          console.log(`Heartbeat check: ${inactiveTime / 1000}s since last activity`);
-          
-          // 如果超过心跳间隔时间，且距离上次进度更新至少15秒，则标记需要发送进度更新
-          const now = Date.now();
-          if (inactiveTime > heartbeatInterval && (now - lastProgressTime) > 15000) {
-            needsProgressUpdate = true;
-            lastProgressTime = now;
-            progressUpdateData = {
-              type: 'progress',
-              content: streamedResponse || '正在处理您的请求...',
-              reasoning: lastReasoning,
-              inactiveTime: inactiveTime
-            };
-          }
-          
-          // 如果超过最大不活动时间，则认为连接已超时
-          if (inactiveTime > maxInactiveTime) {
-            clearInterval(heartbeatTimer);
-            // 不要在这里抛出错误，而是设置一个标志
-            needsProgressUpdate = true;
-            progressUpdateData = {
-              type: 'error',
-              content: `Error: 连接超时，服务器${maxInactiveTime/60000}分钟内没有响应`,
-              timeout: true
-            };
-          }
-        }, heartbeatInterval);
+        // 创建有状态的SSE解析器
+        let sseBuffer = '';
+        let currentEvent = null;
+        let currentData = '';
 
-        let timeoutDetected = false;
-        let readerClosed = false;
-        
-        try {
-          while (!timeoutDetected && !readerClosed) {
-            // 检查是否需要发送进度更新
-            if (needsProgressUpdate) {
-              needsProgressUpdate = false;
-              yield progressUpdateData;
-              
-              // 如果是超时错误，跳出循环
-              if (progressUpdateData.timeout) {
-                timeoutDetected = true;
-                // 确保关闭reader
-                try {
-                  await reader.cancel("Operation timed out");
-                  readerClosed = true;
-                } catch (e) {
-                  console.warn("Error cancelling reader:", e);
-                }
-                break;
-              }
-            }
-            
-            // 使用Promise.race添加读取超时
-            const readTimeout = new Promise((_, reject) => {
-              const timeoutId = setTimeout(() => {
-                clearTimeout(timeoutId);
-                reject(new Error('Read operation timeout'));
-              }, 60000);
-              return () => clearTimeout(timeoutId);
-            });
-            
-            let readResult;
-            try {
-              readResult = await Promise.race([
-                reader.read(),
-                readTimeout
-              ]);
-            } catch (error) {
-              console.warn('Read operation timed out, retrying...', error);
-              // 更新活动时间以防触发心跳超时
-              lastActivityTime = Date.now();
-              continue;
-            }
-            
-            const { value, done } = readResult;
-            if (done) {
-              readerClosed = true;
-              break;
-            }
-            
-            // 更新最后活动时间
-            lastActivityTime = Date.now();
-            
-            buffer += decoder.decode(value, { stream: true });
-            
-            const messages = buffer.split('\n\n');
-            buffer = messages.pop() || '';
-            
-            for (const message of messages) {
-              if (!message.trim()) continue;
-              
-              const parsed = parseSSEData(message);
-              if (parsed) {
-                // 处理完成标记
-                if (parsed.done) {
-                  console.log('接收到完成标记');
-                  continue;
-                }
-                
-                // 检查是否是完整的prompt_history消息
-                if (parsed.prompt_history) {
-                  try {
-                    // parseSSEData已经将prompt_history解析为对象，直接使用
-                    promptHistory = parsed.prompt_history;
-                    console.log('接收到完整的prompt_history消息');
-                    // 不立即处理，等待所有流处理完成后统一处理
-                    continue; // 不作为实时消息向外传递
-                  } catch (e) {
-                    console.warn('处理prompt_history失败:', e);
-                  }
-                }
-                
-                lastReasoning = parsed.reasoning || lastReasoning;
-                streamedResponse = parsed.answer || streamedResponse;
-                
-                yield {
-                  type: 'stream',
-                  content: streamedResponse,
-                  reasoning: lastReasoning
-                };
-              }
-            }
+        mainLoop: while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            break;
           }
 
-          if (buffer.trim() && !timeoutDetected) {
-            const parsed = parseSSEData(buffer);
-            if (parsed) {
-              // 处理完成标记
-              if (parsed.done) {
-                console.log('从最后buffer中接收到完成标记');
-              } 
-              // 检查最后的buffer中是否包含完整消息
-              else if (parsed.prompt_history) {
-                try {
-                  // parseSSEData已经将prompt_history解析为对象，直接使用
-                  promptHistory = parsed.prompt_history;
-                  console.log('从最后的buffer中接收到完整的prompt_history消息');
-                } catch (e) {
-                  console.warn('处理最后的prompt_history失败:', e);
-                }
-              } else {
-                lastReasoning = parsed.reasoning || lastReasoning;
-                streamedResponse = parsed.answer || streamedResponse;
-              }
-            }
-          }
+          const chunk = decoder.decode(value, { stream: true });
+          console.log('原始SSE数据块:', chunk); // 添加调试日志
           
-          if (!timeoutDetected) {
-            // 如果接收到了完整的prompt_history，使用其中的信息构建完整的调试消息
-            if (promptHistory) {
+          // 累积数据块
+          sseBuffer += chunk;
+          const lines = sseBuffer.split('\n');
+          
+          // 保留最后一行（可能不完整）
+          sseBuffer = lines.pop() || '';
+          
+          // 处理完整的行
+          const messages = [];
+          for (const line of lines) {
+            const trimmedLine = line.trim();
+            
+            if (trimmedLine.startsWith('event: ')) {
+              currentEvent = trimmedLine.slice(7).trim();
+            } else if (trimmedLine.startsWith('data: ')) {
+              currentData = trimmedLine.slice(6);
+            } else if (trimmedLine === '' && currentData) {
+              // Empty line indicates end of a message
               try {
-                // 尝试创建调试消息
-                let debugMessage;
-                
-                // 如果promptHistory已经具有所有需要的字段，直接使用它作为基础
-                if (typeof promptHistory === 'object' && promptHistory.question) {
-                  const rawDebugMessage = {
-                    id: promptHistory.uuid || Date.now(),
-                    timestamp: new Date(promptHistory.timestamp || Date.now()),
-                    question: promptHistory.question,
-                    model: promptHistory.model || 'DiModel',
-                    version: promptHistory.version || '1.0.0',
-                    messages: [], // 消息历史将经过处理
-                    retrievmethod: [], // 稍后处理
-                    prompt: promptHistory.prompt || '',
-                    modelResponse: '',
-                    reasoning: '',
-                    processingTime: 0,
-                    tokens: promptHistory.tokens || {
-                      prompt_tokens: 0,
-                      completion_tokens: 0,
-                      total_tokens: 0
-                    }
-                  };
-                  
-                  // 正确处理消息历史，只保留system消息和最后一条user消息
-                  if (Array.isArray(promptHistory.messages)) {
-                    // 提取所有system消息
-                    const systemMessages = promptHistory.messages.filter(msg => msg?.role === 'system');
-                    
-                    // 找到最后一条user消息
-                    const lastUserMessage = promptHistory.messages
-                      .filter(msg => msg?.role === 'user')
-                      .pop();
-                    
-                    // 计算是否需要添加省略号
-                    const hasOtherMessages = promptHistory.messages.length > 
-                      (systemMessages.length + (lastUserMessage ? 1 : 0));
-                    
-                    // 构建新的消息历史
-                    rawDebugMessage.messages = [
-                      ...systemMessages,
-                      // 如果有其他消息，添加省略号消息
-                      ...(hasOtherMessages ? [{ role: 'system', content: '...(省略历史消息)...' }] : []),
-                      // 添加最后一条用户消息（如果有）
-                      ...(lastUserMessage ? [lastUserMessage] : [])
-                    ];
-                  }
-                  
-                  // 处理content字段，提取reasoning和answer
-                  if (promptHistory.content) {
-                    const { answer, reasoning } = parseContent(promptHistory.content);
-                    rawDebugMessage.modelResponse = answer;
-                    rawDebugMessage.reasoning = reasoning;
-                  }
-                  
-                  // 处理召回方法
-                  if (Array.isArray(promptHistory.messages)) {
-                    rawDebugMessage.retrievmethod = extractRecallMethods(promptHistory.messages);
-                  }
-                  
-                  debugMessage = rawDebugMessage;
+                const data = JSON.parse(currentData);
+                messages.push({ event: currentEvent, data });
+                console.log('成功解析SSE消息:', { event: currentEvent, data }); // 添加调试日志
+              } catch (e) {
+                // Handle special cases like [DONE] which is not JSON
+                if (currentData.trim() === '[DONE]') {
+                  messages.push({ event: 'done', data: {} });
                 } else {
-                  // 如果结构不符合预期，使用parseWebSocketMessage
-                  debugMessage = parseWebSocketMessage(promptHistory);
+                  console.warn('Failed to parse SSE data line:', currentData, e);
+                }
+              }
+              currentData = '';
+              currentEvent = null;
+            }
+          }
+
+          console.log('解析后的SSE消息:', messages); // 添加调试日志
+
+          for (const sseMessage of messages) {
+            const { event, data } = sseMessage;
+
+            if (event === 'error') {
+              console.error('SSE Error Event:', data);
+              yield { type: 'error', content: data.message || 'An error occurred', error: data.error };
+              break mainLoop;
+            }
+
+            if (event === 'completion') {
+              console.log('Completion event received, processing final message.');
+              try {
+                // 先解析 prompt_history JSON 字符串
+                let promptHistoryData;
+                if (typeof data.prompt_history === 'string') {
+                  promptHistoryData = JSON.parse(data.prompt_history);
+                } else {
+                  promptHistoryData = data.prompt_history;
                 }
                 
+                const debugMessage = parseWebSocketMessage(promptHistoryData);
                 if (debugMessage) {
-                  console.log('成功创建调试消息:', debugMessage);
                   yield {
                     type: 'complete',
-                    content: debugMessage.modelResponse || streamedResponse,
-                    reasoning: debugMessage.reasoning || lastReasoning,
-                    debug: debugMessage // 传递完整debug信息
+                    content: debugMessage.modelResponse,
+                    reasoning: debugMessage.reasoning,
+                    debug: debugMessage,
                   };
+                  // 成功处理completion事件后直接返回，避免重复
+                  return;
                 } else {
-                  throw new Error('调试消息创建结果为空');
+                  throw new Error('Failed to parse final debug message.');
                 }
               } catch (error) {
-                console.warn('创建调试消息失败，使用流消息作为最终结果:', error);
-                yield {
-                  type: 'complete',
-                  content: streamedResponse,
-                  reasoning: lastReasoning,
-                  parseError: error.message
-                };
+                console.warn('Failed to process completion event:', error);
+                yield { type: 'complete', content: streamedResponse, reasoning: lastReasoning };
+                return; // 避免重复
               }
-            } else {
-              // 如果没有接收到完整消息，使用流式消息中的最终状态
+            }
+            
+            if (event === 'chat_stream') {
+              // 使用完整的 answer 和 reasoning 字段，而不是增量字段
+              // 这样可以确保前端显示的是完整的、格式正确的内容
+              streamedResponse = data.answer || streamedResponse;
+              lastReasoning = data.reasoning || lastReasoning;
+              
+              console.log('流式更新 - Answer:', streamedResponse, 'Reasoning:', lastReasoning); // 添加调试日志
+              
               yield {
-                type: 'complete',
+                type: 'stream',
                 content: streamedResponse,
-                reasoning: lastReasoning
+                reasoning: lastReasoning,
+                // 可选：提供增量信息给前端做更细粒度的渲染优化
+                deltas: {
+                  reasoning: data.reasoning_delta || '',
+                  answer: data.answer_delta || ''
+                }
               };
-            }
-          } else {
-            // 确保在超时情况下也返回一个最终状态
-            yield {
-              type: 'error',
-              content: `连接超时，服务器${maxInactiveTime/60000}分钟内没有响应。已获取的内容：${streamedResponse || '无'}`,
-              reasoning: lastReasoning,
-              timeout: true
-            };
-          }
-          
-          // 成功完成或超时处理完成，跳出重试循环
-          break;
-        } catch (innerError) {
-          console.error('Error during streaming:', innerError);
-          // 在内部出错时也要确保关闭reader
-          try {
-            if (!readerClosed) {
-              await reader.cancel("Error during streaming");
-              readerClosed = true;
-            }
-          } catch (e) {
-            console.warn("Error cancelling reader:", e);
-          }
-          
-          // 如果已经有部分响应，则返回部分响应
-          if (streamedResponse) {
-            yield {
-              type: 'error',
-              content: `处理过程中出错，但已获取部分内容：${streamedResponse}`,
-              reasoning: lastReasoning,
-              error: innerError.message
-            };
-            break;
-          } else {
-            // 否则抛出错误，进入外部catch块进行重试逻辑
-            throw innerError;
-          }
-        } finally {
-          // 清除心跳检测定时器
-          clearInterval(heartbeatTimer);
-          
-          // 确保reader被关闭
-          if (!readerClosed) {
-            try {
-              await reader.cancel("Operation completed or failed");
-            } catch (e) {
-              console.warn("Error cancelling reader in finally block:", e);
             }
           }
         }
-      } catch (error) {
-        console.error(`Error in sendMessage (attempt ${retryCount+1}/${maxRetries+1}):`, error);
         
-        // 如果还有重试机会，则重试
+        // 如果循环正常结束但没有收到completion事件，发送最终消息
+        if (streamedResponse) {
+          console.log('流式结束，发送最终消息');
+          yield { type: 'complete', content: streamedResponse, reasoning: lastReasoning };
+        } else {
+          console.log('流式结束但没有内容');
+        }
+
+        // Success, break the retry loop
+        break;
+      } catch (error) {
         if (retryCount < maxRetries) {
           retryCount++;
-          const waitTime = 2000 * retryCount;
-          console.warn(`${waitTime/1000}秒后进行第${retryCount}次重试...`);
-          yield {
-            type: 'progress',
-            content: `请求出错，正在重试(${retryCount}/${maxRetries})...`,
-            error: error.message,
-            retrying: true
-          };
-          await new Promise(resolve => setTimeout(resolve, waitTime));
+          console.warn(`Request failed, retrying (${retryCount}/${maxRetries}):`, error.message);
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount)); // 指数退避
+          continue; // 重试
         } else {
-          // 已达到最大重试次数，返回错误
-          yield {
-            type: 'error',
-            content: `Error: ${error.message}`,
-            retries: retryCount
-          };
+          console.error('All retries failed:', error);
+          yield { type: 'error', content: `连接失败: ${error.message}`, error: error.message };
           break;
         }
       }
@@ -928,7 +640,7 @@ export const chatApi = {
   // Get available versions
   async getVersions() {
     try {
-      const response = await fetchWithTimeout('/api/versions');
+      const response = await fetchWithTimeout(`${API_BASE_URL}/versions`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
