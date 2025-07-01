@@ -1,8 +1,5 @@
-// WebSocket连接状态常量
-const WS_OPEN = 1;
-
-// 导入WebSocket服务
-import { websocketService } from './services/websocket';
+// 导入SSE服务
+import { sseService } from './services/sse';
 
 // Store samples in memory
 let savedSamples = [];
@@ -44,8 +41,8 @@ const fetchWithTimeout = async (url, options = {}) => {
   }
 };
 
-// 解析WebSocket消息
-const parseWebSocketMessage = (data) => {
+// 解析消息历史数据
+const parseMessageHistory = (data) => {
   try {
     const {
       question,
@@ -113,7 +110,7 @@ const parseWebSocketMessage = (data) => {
       tokens: calculatedTokens
     };
   } catch (error) {
-    console.warn('Error parsing WebSocket message:', error);
+    console.warn('Error parsing message history:', error);
     return null;
   }
 };
@@ -293,14 +290,14 @@ export const chatApi = {
       };
     }
     
-    // 检查WebSocket是否连接，如果未连接则发起连接
+    // 检查SSE是否连接，如果未连接则发起连接
     try {
-      if (!websocketService.ws || websocketService.ws.readyState !== WS_OPEN) {
-        console.log('WebSocket not connected, connecting...');
-        websocketService.connect();
+      if (!sseService.eventSource || sseService.eventSource.readyState !== EventSource.OPEN) {
+        console.log('SSE not connected, connecting...');
+        sseService.connect();
       }
     } catch (error) {
-      console.warn('Failed to connect to WebSocket:', error);
+      console.warn('Failed to connect to SSE:', error);
     }
     
     const effectiveVersion = version || '1.0.0';
@@ -570,7 +567,7 @@ export const chatApi = {
                   promptHistoryData = data.prompt_history;
                 }
                 
-                const debugMessage = parseWebSocketMessage(promptHistoryData);
+                const debugMessage = parseMessageHistory(promptHistoryData);
                 if (debugMessage) {
                   yield {
                     type: 'complete',

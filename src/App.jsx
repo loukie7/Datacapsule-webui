@@ -12,7 +12,7 @@ import DebugPanel from './components/DebugPanel';
 import DocumentParsingPage from './components/DocumentParsingPage';
 import DocumentViewPage from './components/DocumentViewPage';
 import SamplesPage from './components/SamplesPage';
-import { websocketService } from './services/websocket';
+import { sseService } from './services/sse';
 
 // 从 localStorage 加载消息
 const loadMessagesFromStorage = () => {
@@ -247,13 +247,13 @@ function App() {
     localStorage.setItem('currentVersion', currentVersion);
   }, [currentVersion]);
 
-  // 确保WebSocket连接
+  // 确保SSE连接
   useEffect(() => {
-    console.log('确保WebSocket连接...');
-    websocketService.connect();
+    console.log('确保SSE连接...');
+    sseService.connect();
     
     return () => {
-      // 组件卸载时，不断开WebSocket，因为其他组件可能仍需要使用
+      // 组件卸载时，不断开SSE，因为其他组件可能仍需要使用
     };
   }, []);
 
@@ -271,7 +271,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = websocketService.onMessage((debugMessage) => {
+    const unsubscribe = sseService.onMessage((debugMessage) => {
       setDebugData(prev => [...prev, debugMessage]);
     });
 
@@ -282,7 +282,7 @@ function App() {
 
   const handleSendMessage = useCallback(async (message) => {
     setMessages(prev => [...prev, { type: 'user', content: message }]);
-    websocketService.connect();
+    sseService.connect();
 
     try {
       for await (const response of chatApi.sendMessage(message, currentVersion)) {

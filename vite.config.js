@@ -37,7 +37,7 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       // 将环境变量暴露给前端代码
-      'import.meta.env.VITE_WS_URL': JSON.stringify(env.VITE_WS_URL || 'ws://localhost:8080/ws'),
+      'import.meta.env.VITE_SSE_URL': JSON.stringify(env.VITE_SSE_URL || 'http://localhost:8080/events'),
       // 修复 process 未定义的问题
       global: 'globalThis',
     }

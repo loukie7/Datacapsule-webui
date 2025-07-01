@@ -1,9 +1,9 @@
 import { toast } from 'react-hot-toast';
 
-class WebSocketService {
+class SSEService {
   constructor() {
     this.callbacks = new Set();
-    this.ws = null;
+    this.eventSource = null;
     this.currentMessageId = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 3;
@@ -12,72 +12,110 @@ class WebSocketService {
   }
 
   connect() {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.eventSource?.readyState === EventSource.OPEN) {
       return;
     }
 
-    if (this.ws) {
-      this.ws.close();
+    if (this.eventSource) {
+      this.eventSource.close();
     }
 
     this.currentMessageId = Date.now();
 
     try {
-      // 从环境变量中获取WebSocket地址
-      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8080/ws';
-      console.log('Connecting to WebSocket:', wsUrl);
+      // 从环境变量中获取 SSE 地址
+      const sseUrl = import.meta.env.VITE_SSE_URL || 'http://localhost:8080/events';
+      console.log('Connecting to SSE:', sseUrl);
       
-      this.ws = new WebSocket(wsUrl);
+      this.eventSource = new EventSource(sseUrl);
 
-      this.ws.onopen = () => {
-        console.log('WebSocket connected successfully');
+      this.eventSource.onopen = () => {
+        console.log('SSE connected successfully');
         this.reconnectAttempts = 0;
       };
 
-      this.ws.onmessage = (event) => {
+      this.eventSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          
-          // 处理版本更新消息
-          if (data.type === 'version_update' && data.data) {
-            this.handleVersionUpdate(data.data);
-            
-            // 如果是训练完成的版本更新，通知训练完成
-            if (data.data.training_ids) {
-              this.notifyTrainingCompleted(data.data);
-            }
-            return;
-          }
-          
-          // 处理训练状态更新消息
-          if (data.type === 'training_status' && data.data) {
-            this.handleTrainingStatus(data.data);
-            return;
-          }
-          
-          // 处理优化状态更新消息
-          if (data.type === 'optimization_status' && data.data) {
-            this.handleOptimizationStatus(data.data);
-            return;
-          }
-          
-          // 移除对prompt_history的处理，因为这些数据现在通过SSE流获取
+          console.log('Received SSE message:', data);
         } catch (error) {
-          console.warn('Error processing WebSocket message:', error);
+          console.warn('Error parsing SSE message:', error);
         }
       };
 
-      this.ws.onerror = (error) => {
-        console.warn('WebSocket error:', error);
+      // 监听特定事件类型
+      this.eventSource.addEventListener('connected', (event) => {
+        const data = JSON.parse(event.data);
+        console.log('SSE connection confirmed:', data.message);
+      });
+
+      this.eventSource.addEventListener('heartbeat', (event) => {
+        // 心跳消息，用于保持连接
+        const data = JSON.parse(event.data);
+        console.log('SSE heartbeat:', new Date(data.timestamp * 1000));
+      });
+
+      this.eventSource.addEventListener('version_update', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleVersionUpdate(data);
+          
+          // 如果是训练完成的版本更新，通知训练完成
+          if (data.training_ids) {
+            this.notifyTrainingCompleted(data);
+          }
+        } catch (error) {
+          console.warn('Error processing version_update event:', error);
+        }
+      });
+
+      this.eventSource.addEventListener('optimization_status', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleOptimizationStatus(data);
+        } catch (error) {
+          console.warn('Error processing optimization_status event:', error);
+        }
+      });
+
+      this.eventSource.addEventListener('optimization_created', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('Optimization task created:', data);
+          // 可以添加特殊处理逻辑
+        } catch (error) {
+          console.warn('Error processing optimization_created event:', error);
+        }
+      });
+
+      this.eventSource.addEventListener('optimization_failed', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleOptimizationStatus({
+            ...data,
+            status: 'failed'
+          });
+        } catch (error) {
+          console.warn('Error processing optimization_failed event:', error);
+        }
+      });
+
+      this.eventSource.addEventListener('training_status', (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          this.handleTrainingStatus(data);
+        } catch (error) {
+          console.warn('Error processing training_status event:', error);
+        }
+      });
+
+      this.eventSource.onerror = (error) => {
+        console.warn('SSE error:', error);
         this.handleConnectionError();
       };
 
-      this.ws.onclose = () => {
-        console.log('WebSocket disconnected');
-        this.handleConnectionError();
-      };
     } catch (error) {
-      console.warn('Error creating WebSocket:', error);
+      console.warn('Error creating SSE connection:', error);
       this.handleConnectionError();
     }
   }
@@ -85,16 +123,16 @@ class WebSocketService {
   handleConnectionError() {
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      console.log(`Reconnecting... Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
+      console.log(`Reconnecting SSE... Attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
       setTimeout(() => this.connect(), this.reconnectDelay * this.reconnectAttempts);
     } else {
-      console.warn('Max reconnection attempts reached');
+      console.warn('Max SSE reconnection attempts reached');
       this.showConnectionErrorAlert();
     }
   }
 
   showConnectionErrorAlert() {
-    toast.error('无法连接到 WebSocket 服务器，请稍后再试。');
+    toast.error('无法连接到 SSE 服务器，请稍后再试。');
   }
 
   handleVersionUpdate(data) {
@@ -243,9 +281,9 @@ class WebSocketService {
   }
 
   disconnect() {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
     }
     this.callbacks.clear();
     this.trainingCallbacks.clear();
@@ -292,4 +330,4 @@ class WebSocketService {
 }
 
 // Only export once
-export const websocketService = new WebSocketService();
+export const sseService = new SSEService(); 
