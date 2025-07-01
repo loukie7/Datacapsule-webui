@@ -647,14 +647,18 @@ export default function SamplesPage() {
         setIsTraining(false);
         setShowTrainingAnimation(false);
         setTrainingVersion(null);
+        // 训练完成后可以移除连接原因
+        sseService.removeConnectionReason('样本管理');
       }
     });
     
-    // 确保 SSE 连接已建立
-    sseService.connect();
+    // 为样本管理页面建立SSE连接
+    sseService.connectForReason('样本管理');
     
     return () => {
       unsubscribe();
+      // 离开页面时移除连接原因
+      sseService.removeConnectionReason('样本管理');
     };
   }, []);
 

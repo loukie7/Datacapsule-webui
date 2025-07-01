@@ -290,12 +290,9 @@ export const chatApi = {
       };
     }
     
-    // 检查SSE是否连接，如果未连接则发起连接
+    // 为训练任务建立SSE连接
     try {
-      if (!sseService.eventSource || sseService.eventSource.readyState !== EventSource.OPEN) {
-        console.log('SSE not connected, connecting...');
-        sseService.connect();
-      }
+      sseService.connectForReason('训练优化');
     } catch (error) {
       console.warn('Failed to connect to SSE:', error);
     }

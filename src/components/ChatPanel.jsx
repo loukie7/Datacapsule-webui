@@ -1,14 +1,28 @@
-import { useState, useRef, useEffect, memo, useCallback } from 'react';
+import { ArrowPathIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
-import { ArrowPathIcon } from '@heroicons/react/24/outline';
 
-const Message = memo(({ content, type, reasoning, error, onRetry }) => {
+const Message = memo(({ content, type, reasoning, error, onRetry, originalContent }) => {
+  const handleCopy = useCallback(async () => {
+    try {
+      const textToCopy = reasoning ? `${reasoning}\n\n${content}` : content;
+      await navigator.clipboard.writeText(textToCopy);
+      toast.success('已复制到剪贴板');
+    } catch (err) {
+      console.error('复制失败:', err);
+      toast.error('复制失败');
+    }
+  }, [content, reasoning]);
+
+  const handleRetry = useCallback(() => {
+    if (onRetry && (originalContent || content)) {
+      onRetry(originalContent || content);
+    }
+  }, [onRetry, originalContent, content]);
+
   return (
-    <div
-      className={`flex ${
-        type === 'user' ? 'justify-end' : 'justify-start'
-      } mb-3`}
-    >
+    <div className={`flex flex-col ${type === 'user' ? 'items-end' : 'items-start'} mb-3`}>
       <div
         className={`max-w-[85%] rounded-lg p-3 ${
           type === 'user'
@@ -23,20 +37,31 @@ const Message = memo(({ content, type, reasoning, error, onRetry }) => {
         )}
         <div className="text-sm leading-relaxed text-left">
           {error ? (
-            <div className="flex flex-col items-start gap-2">
-              <span className="text-red-500">{content}</span>
-              <button
-                onClick={onRetry}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors"
-              >
-                <ArrowPathIcon className="w-4 h-4" />
-                重试
-              </button>
-            </div>
+            <span className="text-red-500">{content}</span>
           ) : (
             <ReactMarkdown>{content}</ReactMarkdown>
           )}
         </div>
+      </div>
+      
+      {/* 按钮区域 - 消息框外左下角 */}
+      <div className="flex items-center gap-2 mt-1 ml-1">
+        <button
+          onClick={handleRetry}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+          title={type === 'user' ? '重新发送' : '重新生成'}
+        >
+          <ArrowPathIcon className="w-3 h-3" />
+          {type === 'user' ? '重发' : '重试'}
+        </button>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+          title="复制内容"
+        >
+          <ClipboardDocumentIcon className="w-3 h-3" />
+          复制
+        </button>
       </div>
     </div>
   );
@@ -89,6 +114,7 @@ const MessageList = memo(({ messages, streamingMessage, streamingReasoning, onRe
           reasoning={msg.reasoning}
           error={msg.error}
           onRetry={() => onRetry(msg.retryContent)}
+          originalContent={msg.retryContent}
         />
       ))}
       {!streamingMessage && messages.length > 0 && messages[messages.length - 1].type === 'user' && (

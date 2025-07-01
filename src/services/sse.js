@@ -1,5 +1,21 @@
 import { toast } from 'react-hot-toast';
 
+/**
+ * SSE服务 - 按需连接策略
+ * 
+ * 连接策略：
+ * - 根据具体使用场景按需建立连接：
+ *   - 聊天对话时：connectForReason('聊天对话')
+ *   - 训练优化时：connectForReason('训练优化') 
+ *   - 版本切换时：connectForReason('版本切换')
+ *   - 样本管理页面：connectForReason('样本管理')
+ * 
+ * 智能断开机制：
+ * - 跟踪所有连接原因
+ * - 当所有连接原因都被移除后，30秒内无活动自动断开
+ * - 接收到SSE消息时重置断开定时器
+ */
+
 class SSEService {
   constructor() {
     this.callbacks = new Set();
@@ -9,6 +25,9 @@ class SSEService {
     this.maxReconnectAttempts = 3;
     this.reconnectDelay = 1000;
     this.trainingCallbacks = new Set(); // 添加训练状态回调集合
+    this.connectionReasons = new Set(); // 跟踪连接原因
+    this.autoDisconnectTimer = null; // 自动断开定时器
+    this.autoDisconnectDelay = 60000; // 30秒无活动后自动断开
   }
 
   connect() {
@@ -38,6 +57,8 @@ class SSEService {
         try {
           const data = JSON.parse(event.data);
           console.log('Received SSE message:', data);
+          // 重置自动断开定时器（有活动）
+          this.resetAutoDisconnectTimer();
         } catch (error) {
           console.warn('Error parsing SSE message:', error);
         }
@@ -228,6 +249,9 @@ class SSEService {
         });
       }
     });
+    
+    // 训练完成后移除训练相关的连接原因
+    this.removeConnectionReason('训练优化');
   }
   
   // 添加训练状态监听方法
@@ -287,7 +311,14 @@ class SSEService {
     }
     this.callbacks.clear();
     this.trainingCallbacks.clear();
+    this.connectionReasons.clear();
     this.reconnectAttempts = 0;
+    
+    // 清除自动断开定时器
+    if (this.autoDisconnectTimer) {
+      clearTimeout(this.autoDisconnectTimer);
+      this.autoDisconnectTimer = null;
+    }
   }
   
   // 添加处理优化状态的方法
@@ -325,6 +356,47 @@ class SSEService {
       }
     } catch (error) {
       console.error('Error handling optimization status:', error);
+    }
+  }
+
+  // 智能连接 - 根据使用场景连接
+  connectForReason(reason) {
+    console.log(`SSE连接请求: ${reason}`);
+    this.connectionReasons.add(reason);
+    this.connect();
+    this.resetAutoDisconnectTimer();
+  }
+
+  // 移除连接原因，如果没有其他原因则考虑断开
+  removeConnectionReason(reason) {
+    this.connectionReasons.delete(reason);
+    console.log(`移除SSE连接原因: ${reason}, 剩余原因: ${Array.from(this.connectionReasons)}`);
+    
+    if (this.connectionReasons.size === 0) {
+      this.scheduleAutoDisconnect();
+    }
+  }
+
+  // 重置自动断开定时器
+  resetAutoDisconnectTimer() {
+    if (this.autoDisconnectTimer) {
+      clearTimeout(this.autoDisconnectTimer);
+    }
+    this.scheduleAutoDisconnect();
+  }
+
+  // 安排自动断开
+  scheduleAutoDisconnect() {
+    if (this.autoDisconnectTimer) {
+      clearTimeout(this.autoDisconnectTimer);
+    }
+    
+    // 只有在没有连接原因时才安排自动断开
+    if (this.connectionReasons.size === 0) {
+      this.autoDisconnectTimer = setTimeout(() => {
+        console.log('SSE空闲超时，自动断开连接');
+        this.disconnect();
+      }, this.autoDisconnectDelay);
     }
   }
 }

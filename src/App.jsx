@@ -247,16 +247,6 @@ function App() {
     localStorage.setItem('currentVersion', currentVersion);
   }, [currentVersion]);
 
-  // 确保SSE连接
-  useEffect(() => {
-    console.log('确保SSE连接...');
-    sseService.connect();
-    
-    return () => {
-      // 组件卸载时，不断开SSE，因为其他组件可能仍需要使用
-    };
-  }, []);
-
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -282,7 +272,7 @@ function App() {
 
   const handleSendMessage = useCallback(async (message) => {
     setMessages(prev => [...prev, { type: 'user', content: message }]);
-    sseService.connect();
+    sseService.connectForReason('聊天对话');
 
     try {
       for await (const response of chatApi.sendMessage(message, currentVersion)) {
@@ -364,6 +354,8 @@ function App() {
   const handleVersionSelect = (version) => {
     setCurrentVersion(version);
     console.log('Version switched to:', version);
+    // 版本切换时建立SSE连接以接收版本更新事件
+    sseService.connectForReason('版本切换');
   };
 
   // 清除所有数据
