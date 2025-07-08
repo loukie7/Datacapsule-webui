@@ -479,7 +479,7 @@ function App() {
                           >
                             查看所有样本
                           </button>
-                          <button
+                          {/* <button
                             onClick={() => {
                               setMenuOpen(false);
                               navigate('/document-parsing');
@@ -487,7 +487,7 @@ function App() {
                             className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                           >
                             文档解析
-                          </button>
+                          </button> */}
                           <button
                             onClick={() => {
                               setMenuOpen(false);
