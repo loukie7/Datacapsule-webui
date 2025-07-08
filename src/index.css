@@ -62,3 +62,16 @@ body {
   height: 100% !important;
   display: flex;
 }
+
+.table-content-view table {
+    @apply w-full border-collapse;
+}
+
+.table-content-view th,
+.table-content-view td {
+    @apply border border-gray-300 p-2 text-center;
+}
+
+.markdown-content p {
+    @apply text-left;
+}

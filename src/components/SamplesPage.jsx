@@ -1,12 +1,12 @@
 import {
-  ArrowLeftIcon,
-  BeakerIcon,
-  ChevronDoubleLeftIcon,
-  ChevronDoubleRightIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  FunnelIcon,
-  TrashIcon,
+    ArrowLeftIcon,
+    BeakerIcon,
+    ChevronDoubleLeftIcon,
+    ChevronDoubleRightIcon,
+    ChevronLeftIcon,
+    ChevronRightIcon,
+    FunnelIcon,
+    TrashIcon,
 } from '@heroicons/react/24/outline';
 import classNames from 'classnames';
 import { format } from 'date-fns';
@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { chatApi } from '../api';
-import { websocketService } from '../services/websocket';
+import { sseService } from '../services/sse';
 
 const PAGE_SIZE = 5;
 
@@ -27,7 +27,7 @@ const TrainingAnimation = ({ isVisible }) => {
     if (!isVisible) return;
     
     // 监听优化状态更新
-    const unsubscribe = websocketService.onTrainingStatus((data) => {
+    const unsubscribe = sseService.onTrainingStatus((data) => {
       console.log('Training animation received data:', data);
       
       if (data.type === 'optimization_status') {
@@ -637,9 +637,9 @@ export default function SamplesPage() {
     setCurrentPage(page);
   };
 
-  // 添加 WebSocket 训练状态监听
+  // 添加 SSE 训练状态监听
   useEffect(() => {
-    const unsubscribe = websocketService.onTrainingStatus((data) => {
+    const unsubscribe = sseService.onTrainingStatus((data) => {
       console.log('SamplesPage received training status:', data);
       
       if (data.type === 'training_completed' || 
@@ -647,14 +647,18 @@ export default function SamplesPage() {
         setIsTraining(false);
         setShowTrainingAnimation(false);
         setTrainingVersion(null);
+        // 训练完成后可以移除连接原因
+        sseService.removeConnectionReason('样本管理');
       }
     });
     
-    // 确保 WebSocket 连接已建立
-    websocketService.connect();
+    // 为样本管理页面建立SSE连接
+    sseService.connectForReason('样本管理');
     
     return () => {
       unsubscribe();
+      // 离开页面时移除连接原因
+      sseService.removeConnectionReason('样本管理');
     };
   }, []);
 

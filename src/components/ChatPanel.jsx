@@ -1,14 +1,28 @@
-import { useState, useRef, useEffect, memo, useCallback } from 'react';
+import { ArrowPathIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
-import { ArrowPathIcon } from '@heroicons/react/24/outline';
 
-const Message = memo(({ content, type, reasoning, error, onRetry }) => {
+const Message = memo(({ content, type, reasoning, error, onRetry, originalContent }) => {
+  const handleCopy = useCallback(async () => {
+    try {
+      const textToCopy = reasoning ? `${reasoning}\n\n${content}` : content;
+      await navigator.clipboard.writeText(textToCopy);
+      toast.success('已复制到剪贴板');
+    } catch (err) {
+      console.error('复制失败:', err);
+      toast.error('复制失败');
+    }
+  }, [content, reasoning]);
+
+  const handleRetry = useCallback(() => {
+    if (onRetry && (originalContent || content)) {
+      onRetry(originalContent || content);
+    }
+  }, [onRetry, originalContent, content]);
+
   return (
-    <div
-      className={`flex ${
-        type === 'user' ? 'justify-end' : 'justify-start'
-      } mb-3`}
-    >
+    <div className={`flex flex-col ${type === 'user' ? 'items-end' : 'items-start'} mb-3`}>
       <div
         className={`max-w-[85%] rounded-lg p-3 ${
           type === 'user'
@@ -16,48 +30,90 @@ const Message = memo(({ content, type, reasoning, error, onRetry }) => {
             : 'bg-white text-gray-800 shadow-sm border border-gray-100'
         }`}
       >
-        {reasoning && (
-          <div className="mb-2 text-xs text-left opacity-80">
-            <ReactMarkdown>{reasoning}</ReactMarkdown>
-          </div>
-        )}
+        {/* 移除推理内容显示，只在StreamingMessage中显示 */}
         <div className="text-sm leading-relaxed text-left">
           {error ? (
-            <div className="flex flex-col items-start gap-2">
-              <span className="text-red-500">{content}</span>
-              <button
-                onClick={onRetry}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm text-white bg-blue-500 rounded-md hover:bg-blue-600 transition-colors"
-              >
-                <ArrowPathIcon className="w-4 h-4" />
-                重试
-              </button>
-            </div>
+            <span className="text-red-500">{content}</span>
           ) : (
             <ReactMarkdown>{content}</ReactMarkdown>
           )}
         </div>
       </div>
-    </div>
-  );
-});
-
-const StreamingMessage = memo(({ content, reasoning }) => {
-  return (
-    <div className="flex justify-start mb-3">
-      <div className="max-w-[85%] rounded-lg p-3 bg-white text-gray-800 shadow-sm border border-gray-100">
-        {reasoning && (
-          <div className="mb-2 text-xs text-left opacity-80">
-            <ReactMarkdown>{reasoning}</ReactMarkdown>
-          </div>
-        )}
-        <div className="text-sm leading-relaxed text-left">
-          <ReactMarkdown>{content}</ReactMarkdown>
-        </div>
+      
+      {/* 按钮区域 - 消息框外左下角 */}
+      <div className="flex items-center gap-2 mt-1 ml-1">
+        <button
+          onClick={handleRetry}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+          title={type === 'user' ? '重新发送' : '重新生成'}
+        >
+          <ArrowPathIcon className="w-3 h-3" />
+          {type === 'user' ? '重发' : '重试'}
+        </button>
+        <button
+          onClick={handleCopy}
+          className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+          title="复制内容"
+        >
+          <ClipboardDocumentIcon className="w-3 h-3" />
+          复制
+        </button>
       </div>
     </div>
   );
 });
+
+const StreamingMessage = memo(({ content, reasoning, stepType }) => {
+  // 将推理文本按步骤分割（后端已经格式化好了）
+  const reasoningSteps = reasoning ? reasoning.split('\n\n').filter(step => step.trim()) : [];
+
+  return (
+    <div className="flex justify-start mb-3">
+      <div className="max-w-[85%] rounded-lg p-3 bg-white text-gray-800 shadow-sm border border-gray-100">
+        {/* 显示推理过程 */}
+        {reasoning && (
+          <div className="mb-2 text-xs text-left opacity-80">
+            <div className="font-medium text-blue-600 mb-2">
+              {stepType === 'thinking' && '🤔 思考中...'}
+              {stepType === 'tool_call' && '🔧 调用工具'}
+              {stepType === 'observation' && '👀 观察结果'}
+              {stepType === 'final_answer' && '✅ 最终答案'}
+              {!stepType && '推理过程'}
+            </div>
+            {/* 按步骤显示推理内容 */}
+            <div className="space-y-2">
+              {reasoningSteps.map((step, index) => (
+                <div key={index} className="bg-gray-50 rounded p-2 border-l-2 border-blue-200">
+                  <div className="text-gray-700 whitespace-pre-wrap">{step}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {/* 显示答案内容 - 只在最终答案阶段显示流式输出 */}
+        {content && stepType === 'final_answer' && (
+          <div className="text-sm leading-relaxed text-left">
+            <ReactMarkdown>{content}</ReactMarkdown>
+          </div>
+        )}
+        {/* 流式指示器 - 只在推理阶段显示 */}
+        {reasoning && stepType !== 'final_answer' && (
+          <div className="flex items-center mt-2 text-xs text-gray-400">
+            <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse"></div>
+            <span className="ml-1">
+              {stepType === 'thinking' && '推理中...'}
+              {stepType === 'tool_call' && '调用工具中...'}
+              {stepType === 'observation' && '分析结果中...'}
+              {!stepType && '处理中...'}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+});
+
+StreamingMessage.displayName = 'StreamingMessage';
 
 const ThinkingIndicator = memo(() => {
   return (
@@ -74,43 +130,72 @@ const ThinkingIndicator = memo(() => {
   );
 });
 
-const MessageList = memo(({ messages, streamingMessage, streamingReasoning, onRetry }) => {
+const MessageList = memo(({ messages, streamingMessage, streamingReasoning, streamingStepType, onRetry }) => {
   const renderKey = useCallback((msg, index) => {
     return `${msg.type}-${index}-${msg.content.substring(0, 20)}`;
   }, []);
 
-  return (
-    <>
-      {messages.map((msg, index) => (
+  // 按时间顺序渲染消息，保持正确的对话顺序
+  const renderMessages = () => {
+    const result = [];
+    
+    // 遍历消息，按对话对渲染
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      
+      // 渲染消息
+      result.push(
         <Message
-          key={renderKey(msg, index)}
+          key={`msg-${i}-${msg.type}`}
           type={msg.type}
           content={msg.content}
-          reasoning={msg.reasoning}
           error={msg.error}
-          onRetry={() => onRetry(msg.retryContent)}
+          onRetry={onRetry}
+          originalContent={msg.retryContent || msg.content}
         />
-      ))}
-      {!streamingMessage && messages.length > 0 && messages[messages.length - 1].type === 'user' && (
-        <ThinkingIndicator />
-      )}
-      {streamingMessage && (
-        <StreamingMessage 
-          content={streamingMessage}
-          reasoning={streamingReasoning}
-        />
-      )}
+      );
+      
+      // 如果是最后一条用户消息，且没有对应的助手消息，则显示思考过程
+      if (msg.type === 'user' && i === messages.length - 1 && !messages[i + 1]) {
+        // 思考指示器 - 当没有流式内容时显示
+        if (!streamingMessage && !streamingReasoning) {
+          result.push(
+            <ThinkingIndicator key={`thinking-${i}`} />
+          );
+        }
+        
+        // 思考过程 - 流式推理内容
+        if (streamingMessage || streamingReasoning) {
+          result.push(
+            <StreamingMessage 
+              key={`streaming-${i}`}
+              content={streamingMessage}
+              reasoning={streamingReasoning}
+              stepType={streamingStepType}
+            />
+          );
+        }
+      }
+    }
+    
+    return result;
+  };
+
+  return (
+    <>
+      {renderMessages()}
     </>
   );
 }, (prevProps, nextProps) => {
   return (
     prevProps.messages === nextProps.messages &&
     prevProps.streamingMessage === nextProps.streamingMessage &&
-    prevProps.streamingReasoning === nextProps.streamingReasoning
+    prevProps.streamingReasoning === nextProps.streamingReasoning &&
+    prevProps.streamingStepType === nextProps.streamingStepType
   );
 });
 
-export default function ChatPanel({ onSendMessage, messages, streamingMessage, streamingReasoning }) {
+export default function ChatPanel({ onSendMessage, messages, streamingMessage, streamingReasoning, streamingStepType }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef(null);
   const messageListRef = useRef(null);
@@ -175,6 +260,7 @@ export default function ChatPanel({ onSendMessage, messages, streamingMessage, s
           messages={messages}
           streamingMessage={streamingMessage}
           streamingReasoning={streamingReasoning}
+          streamingStepType={streamingStepType}
           onRetry={handleRetry}
         />
         <div ref={messagesEndRef} className="h-0" />

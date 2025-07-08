@@ -1,5 +1,6 @@
 import { ChatBubbleLeftRightIcon, CodeBracketIcon, EllipsisVerticalIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Toaster, toast } from 'react-hot-toast';
 import { Route, Routes, useNavigate } from 'react-router-dom';
 import SplitPane from 'split-pane-react';
@@ -8,8 +9,10 @@ import { chatApi } from './api';
 import './App.css';
 import ChatPanel from './components/ChatPanel';
 import DebugPanel from './components/DebugPanel';
+import DocumentParsingPage from './components/DocumentParsingPage';
+import DocumentViewPage from './components/DocumentViewPage';
 import SamplesPage from './components/SamplesPage';
-import { websocketService } from './services/websocket';
+import { sseService } from './services/sse';
 
 // 从 localStorage 加载消息
 const loadMessagesFromStorage = () => {
@@ -209,6 +212,7 @@ function App() {
   const [messages, setMessages] = useState(loadMessagesFromStorage);
   const [streamingMessage, setStreamingMessage] = useState('');
   const [streamingReasoning, setStreamingReasoning] = useState('');
+  const [streamingStepType, setStreamingStepType] = useState('');
   const [debugData, setDebugData] = useState(loadDebugDataFromStorage);
   const [sizes, setSizes] = useState(['50%', '50%']);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -244,16 +248,6 @@ function App() {
     localStorage.setItem('currentVersion', currentVersion);
   }, [currentVersion]);
 
-  // 确保WebSocket连接
-  useEffect(() => {
-    console.log('确保WebSocket连接...');
-    websocketService.connect();
-    
-    return () => {
-      // 组件卸载时，不断开WebSocket，因为其他组件可能仍需要使用
-    };
-  }, []);
-
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
@@ -268,7 +262,8 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const unsubscribe = websocketService.onMessage((debugMessage) => {
+    const unsubscribe = sseService.onMessage((debugMessage) => {
+      // 只处理非聊天相关的调试消息（版本更新、训练状态等）
       setDebugData(prev => [...prev, debugMessage]);
     });
 
@@ -278,23 +273,44 @@ function App() {
   }, []);
 
   const handleSendMessage = useCallback(async (message) => {
-    setMessages(prev => [...prev, { type: 'user', content: message }]);
-    websocketService.connect();
+    // 添加用户消息，包含retryContent字段
+    setMessages(prev => [...prev, { 
+      type: 'user', 
+      content: message,
+      retryContent: message  // 添加重试内容字段
+    }]);
+    
+    // 清空之前的推理过程，准备新的对话
+    setStreamingMessage('');
+    setStreamingReasoning('');
+    setStreamingStepType('');
+    
+    // SSE连接用于状态推送（版本更新等），聊天流式数据直接通过API处理
+    sseService.connectForReason('聊天对话');
 
     try {
+      // 直接发送流式聊天请求并处理SSE响应
       for await (const response of chatApi.sendMessage(message, currentVersion)) {
+        console.log('收到流式响应:', response); // 添加调试日志
+        
         if (response.type === 'stream') {
-          setStreamingMessage(response.content);
-          setStreamingReasoning(response.reasoning || '');
+          // 使用 flushSync 强制立即更新状态，确保实时显示
+          flushSync(() => {
+            setStreamingMessage(response.content || '');
+            setStreamingReasoning(response.reasoning || '');
+            setStreamingStepType(response.stepType || '');
+          });
         } else if (response.type === 'complete') {
+          // 清空流式消息
           setStreamingMessage('');
-          setStreamingReasoning('');
+          
+          // 添加最终消息
           setMessages(prev => [
             ...prev,
             { 
               type: 'assistant', 
               content: response.content,
-              reasoning: response.reasoning 
+              retryContent: message
             }
           ]);
           
@@ -304,8 +320,10 @@ function App() {
             setDebugData(prev => [...prev, response.debug]);
           }
         } else if (response.type === 'error') {
+          // 清空流式消息
           setStreamingMessage('');
-          setStreamingReasoning('');
+          
+          // 添加错误消息
           setMessages(prev => [
             ...prev,
             { 
@@ -317,10 +335,11 @@ function App() {
           ]);
         }
       }
+      
     } catch (error) {
-      console.error('Error in message stream:', error);
+      console.error('Error sending message:', error);
+      // 清空流式消息
       setStreamingMessage('');
-      setStreamingReasoning('');
       setMessages(prev => [
         ...prev,
         { 
@@ -352,6 +371,8 @@ function App() {
   const handleVersionSelect = (version) => {
     setCurrentVersion(version);
     console.log('Version switched to:', version);
+    // 版本切换时建立SSE连接以接收版本更新事件
+    sseService.connectForReason('版本切换');
   };
 
   // 清除所有数据
@@ -461,6 +482,15 @@ function App() {
                           <button
                             onClick={() => {
                               setMenuOpen(false);
+                              navigate('/document-parsing');
+                            }}
+                            className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          >
+                            文档解析
+                          </button>
+                          <button
+                            onClick={() => {
+                              setMenuOpen(false);
                               setIsBatchValidationOpen(true);
                             }}
                             className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
@@ -503,6 +533,7 @@ function App() {
                     messages={messages}
                     streamingMessage={streamingMessage}
                     streamingReasoning={streamingReasoning}
+                    streamingStepType={streamingStepType}
                     onSendMessage={handleSendMessage}
                   />
                   <DebugPanel 
@@ -527,6 +558,8 @@ function App() {
             </>
           } />
           <Route path="/samples" element={<SamplesPage />} />
+          <Route path="/document-parsing" element={<DocumentParsingPage />} />
+          <Route path="/document-view/:id" element={<DocumentViewPage />} />
         </Routes>
       </div>
     </>
